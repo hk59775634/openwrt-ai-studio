@@ -4,6 +4,10 @@ Web IDE for OpenWrt LuCI apps and firmware. Clone this repository on any Linux h
 
 中文：任意目录克隆后执行 `./scripts/bootstrap.sh` 再 `make up`。数据目录、仓库路径、Docker gid 都写进 `infrastructure/compose/.env`，不要改代码里的绝对路径。
 
+This project was built in [Cursor](https://cursor.com) with Agent (**vibe coding**): prompts in the IDE, not a handwritten codebase. Local Agent transcripts from 8–16 Sep 2026 add up to about **130 million tokens** (81 user prompts, 1,159 model steps, counting conversation context replayed on each step). That is an estimate from this machine’s session logs, not the Cursor billing dashboard.
+
+中文：本项目通过 Cursor 的 vibe coding（Agent）模式开发。2026 年 9 月 8 日至 16 日本机 Agent 会话合计约 **1.3 亿 token**（81 次提问、1159 次模型步骤，按每一步回放对话上下文估算）。
+
 ## Requirements
 
 - Linux (uid 1000 in the containers; data dirs are owned by 1000:1000)
@@ -13,7 +17,7 @@ Web IDE for OpenWrt LuCI apps and firmware. Clone this repository on any Linux h
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/openwrt-ai-studio.git
+git clone https://github.com/hk59775634/openwrt-ai-studio.git
 cd openwrt-ai-studio
 ./scripts/bootstrap.sh
 make up
