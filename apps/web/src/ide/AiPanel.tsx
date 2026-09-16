@@ -154,7 +154,7 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
         }
       }
     }
-    const timer = window.setInterval(() => void tick(session.id), 900);
+    const timer = window.setInterval(() => void tick(session.id), 400);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -276,6 +276,8 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
   }
 
   const empty = Boolean(session && session.messages.length === 0 && !busy);
+  const lastVisible = session?.messages.at(-1);
+  const streamingReply = Boolean(busy && lastVisible && lastVisible.role === 'assistant' && lastVisible.content);
 
   return (
     <aside className="ide-ai">
@@ -342,16 +344,17 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
           <>
             {!session && <p className="ai-empty muted">Starting isolated session…</p>}
             {empty && <p className="ai-empty muted">Ask the agent to edit this OpenWrt project.</p>}
-            {session?.messages.map((message) => {
+            {session?.messages.map((message, index) => {
               const fromUser = message.role === 'user';
+              const streaming = Boolean(streamingReply && !fromUser && index === session.messages.length - 1);
               return (
-                <div key={message.id} className={`ai-msg ${fromUser ? 'user' : 'assistant'}`}>
+                <div key={message.id} className={`ai-msg ${fromUser ? 'user' : 'assistant'}${streaming ? ' streaming' : ''}`}>
                   <span className="ai-msg-role">{fromUser ? 'You' : 'Agent'}</span>
                   <pre>{message.content}</pre>
                 </div>
               );
             })}
-            {busy && (
+            {busy && !streamingReply && (
               <div className="ai-generating">
                 <span className="ai-dots" aria-hidden="true" />
                 Generating…

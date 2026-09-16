@@ -31,7 +31,10 @@ x-php-env: &php-env
   AI_GATEWAY_URL: ${AI_GATEWAY_URL}
   AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY}
   AI_GATEWAY_MODEL: ${AI_GATEWAY_MODEL:-}
+  AI_GATEWAY_TIMEOUT: "${AI_GATEWAY_TIMEOUT:-300}"
+  AI_GATEWAY_RETRIES: "${AI_GATEWAY_RETRIES:-3}"
   AI_TOOL_MODE: ${AI_TOOL_MODE:-auto}
+  AI_MAX_ITERATIONS: "${AI_MAX_ITERATIONS:-0}"
   AGENT_TYPE: studio
   SANDBOX_DRIVER: docker
   SANDBOX_IMAGE: openwrt-ai-agent:latest
@@ -216,7 +219,7 @@ services:
         condition: service_healthy
     environment:
       <<: *php-env
-    entrypoint: ["php", "artisan", "queue:work", "redis", "--queue=agent", "--sleep=1", "--tries=1", "--timeout=180"]
+    entrypoint: ["php", "artisan", "queue:work", "redis", "--queue=agent", "--sleep=1", "--tries=1", "--timeout=0"]
 
   buildroot:
     build:

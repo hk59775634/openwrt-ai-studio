@@ -560,6 +560,16 @@ body.ide-row-resize * {
 .ai-msg.assistant .ai-msg-role {
   color: var(--muted);
 }
+.ai-msg.assistant.streaming pre::after {
+  content: "▍";
+  margin-left: 1px;
+  color: var(--accent);
+  animation: ai-caret 1s step-end infinite;
+}
+@keyframes ai-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
 .ai-generating {
   display: flex;
   align-items: center;

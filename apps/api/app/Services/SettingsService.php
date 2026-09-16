@@ -15,6 +15,7 @@ class SettingsService
         'ai_gateway_api_key',
         'ai_gateway_model',
         'ai_gateway_timeout',
+        'ai_gateway_retries',
         'ai_tool_mode',
         'quota_workspaces',
         'quota_builds_per_hour',
@@ -75,7 +76,8 @@ class SettingsService
             'ai_gateway_url' => rtrim((string) $this->get('ai_gateway_url', ''), '/'),
             'ai_gateway_api_key_set' => $key !== '',
             'ai_gateway_model' => (string) $this->get('ai_gateway_model', ''),
-            'ai_gateway_timeout' => (int) $this->get('ai_gateway_timeout', 90),
+            'ai_gateway_timeout' => (int) $this->get('ai_gateway_timeout', 300),
+            'ai_gateway_retries' => (int) $this->get('ai_gateway_retries', 3),
             'ai_tool_mode' => (string) $this->get('ai_tool_mode', 'auto'),
             'quota_workspaces' => (int) $this->get('quota_workspaces', 20),
             'quota_builds_per_hour' => (int) $this->get('quota_builds_per_hour', 20),
@@ -84,7 +86,7 @@ class SettingsService
 
     private function cast(string $key, mixed $value): mixed
     {
-        if (in_array($key, ['ai_gateway_timeout', 'quota_workspaces', 'quota_builds_per_hour'], true)) {
+        if (in_array($key, ['ai_gateway_timeout', 'ai_gateway_retries', 'quota_workspaces', 'quota_builds_per_hour'], true)) {
             return (int) $value;
         }
 

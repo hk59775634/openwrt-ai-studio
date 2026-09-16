@@ -28,6 +28,7 @@ class SettingsController extends Controller
             'ai_gateway_api_key' => ['nullable', 'string', 'max:512'],
             'ai_gateway_model' => ['nullable', 'string', 'max:120'],
             'ai_gateway_timeout' => ['nullable', 'integer', 'min:10', 'max:300'],
+            'ai_gateway_retries' => ['nullable', 'integer', 'min:0', 'max:10'],
             'ai_tool_mode' => ['nullable', 'in:auto,openai,json'],
             'quota_workspaces' => ['nullable', 'integer', 'min:1', 'max:500'],
             'quota_builds_per_hour' => ['nullable', 'integer', 'min:1', 'max:500'],

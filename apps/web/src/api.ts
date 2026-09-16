@@ -333,6 +333,7 @@ export type StudioSettings = {
   ai_gateway_api_key_set: boolean;
   ai_gateway_model: string;
   ai_gateway_timeout: number;
+  ai_gateway_retries: number;
   ai_tool_mode: 'auto' | 'openai' | 'json';
   quota_workspaces: number;
   quota_builds_per_hour: number;

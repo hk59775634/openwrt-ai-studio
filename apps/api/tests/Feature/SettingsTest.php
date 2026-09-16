@@ -33,11 +33,13 @@ class SettingsTest extends TestCase
                 'ai_gateway_url' => 'https://llm.example.test',
                 'ai_gateway_api_key' => 'secret-key-123',
                 'ai_gateway_model' => 'studio-model',
+                'ai_gateway_retries' => 4,
                 'quota_workspaces' => 7,
             ])
             ->assertOk()
             ->assertJsonPath('data.ai_gateway_url', 'https://llm.example.test')
             ->assertJsonPath('data.ai_gateway_model', 'studio-model')
+            ->assertJsonPath('data.ai_gateway_retries', 4)
             ->assertJsonPath('data.quota_workspaces', 7)
             ->assertJsonPath('data.ai_gateway_api_key_set', true)
             ->assertJsonMissingPath('data.ai_gateway_api_key');
@@ -46,6 +48,7 @@ class SettingsTest extends TestCase
         $this->assertSame('https://llm.example.test', app(AiGateway::class)->url());
         $this->assertSame('secret-key-123', $settings->get('ai_gateway_api_key'));
         $this->assertSame(7, $settings->get('quota_workspaces'));
+        $this->assertSame(4, $settings->get('ai_gateway_retries'));
     }
 
     public function test_blank_api_key_does_not_clear_existing_secret(): void

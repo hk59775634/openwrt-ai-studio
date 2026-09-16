@@ -7,7 +7,8 @@ const EMPTY: StudioSettings = {
   ai_gateway_url: '',
   ai_gateway_api_key_set: false,
   ai_gateway_model: '',
-  ai_gateway_timeout: 90,
+  ai_gateway_timeout: 300,
+  ai_gateway_retries: 3,
   ai_tool_mode: 'auto',
   quota_workspaces: 20,
   quota_builds_per_hour: 20,
@@ -39,6 +40,7 @@ export function SettingsPage() {
         ai_gateway_api_key: apiKey || undefined,
         ai_gateway_model: form.ai_gateway_model,
         ai_gateway_timeout: form.ai_gateway_timeout,
+        ai_gateway_retries: form.ai_gateway_retries,
         ai_tool_mode: form.ai_tool_mode,
         quota_workspaces: form.quota_workspaces,
         quota_builds_per_hour: form.quota_builds_per_hour,
@@ -111,6 +113,19 @@ export function SettingsPage() {
               onChange={(event) => setForm({ ...form, ai_gateway_timeout: Number(event.target.value) })}
             />
           </label>
+          <label>
+            AI retries
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={form.ai_gateway_retries}
+              onChange={(event) => setForm({ ...form, ai_gateway_retries: Number(event.target.value) })}
+            />
+          </label>
+          <p className="muted">
+            Extra attempts after upstream 502/503/504 or timeout. 0 means fail immediately. The agent keeps the same turn, so you do not need to send Continue.
+          </p>
           <label>
             Tool mode
             <select

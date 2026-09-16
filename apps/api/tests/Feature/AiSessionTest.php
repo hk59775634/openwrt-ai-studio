@@ -260,6 +260,217 @@ class AiSessionTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_agent_stops_after_max_tool_iterations(): void
+    {
+        config(['studio.ai_max_iterations' => 2]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::sequence()
+                ->push($this->toolCallResponse('call_1', 'write_file', [
+                    'path' => 'ONE.md',
+                    'content' => "one\n",
+                ]))
+                ->push($this->toolCallResponse('call_2', 'write_file', [
+                    'path' => 'TWO.md',
+                    'content' => "two\n",
+                ])),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'cap-ai',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Edit several files.',
+        ]);
+
+        $messages = $reply->json('data.messages');
+        $reply->assertOk()->assertJsonPath('data.status', 'idle');
+        $this->assertSame(
+            'Stopped after 2 tool steps. Review the diff and continue if needed.',
+            end($messages)['content'],
+        );
+    }
+
+    public function test_agent_with_zero_max_iterations_keeps_going_until_a_reply(): void
+    {
+        config(['studio.ai_max_iterations' => 0]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::sequence()
+                ->push($this->toolCallResponse('call_1', 'write_file', [
+                    'path' => 'ONE.md',
+                    'content' => "one\n",
+                ]))
+                ->push($this->toolCallResponse('call_2', 'write_file', [
+                    'path' => 'TWO.md',
+                    'content' => "two\n",
+                ]))
+                ->push($this->toolCallResponse('call_3', 'write_file', [
+                    'path' => 'THREE.md',
+                    'content' => "three\n",
+                ]))
+                ->push($this->textResponse('Wrote three files.')),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'uncapped-ai',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Edit several files.',
+        ]);
+
+        $messages = $reply->json('data.messages');
+        $reply->assertOk()->assertJsonPath('data.status', 'idle');
+        $this->assertSame('Wrote three files.', end($messages)['content']);
+        $this->assertCount(3, $reply->json('data.operations'));
+    }
+
+    public function test_agent_retries_transient_gateway_errors(): void
+    {
+        config(['studio.ai_gateway_retries' => 2]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::sequence()
+                ->push('error code: 504', 504)
+                ->push($this->textResponse('Recovered after a gateway timeout.')),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'retry-ai',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Say hello.',
+        ]);
+
+        $messages = $reply->json('data.messages');
+        $reply->assertOk()->assertJsonPath('data.status', 'idle');
+        $this->assertSame('Recovered after a gateway timeout.', end($messages)['content']);
+        $this->assertSame(2, $this->chatRequestCount());
+    }
+
+    public function test_agent_does_not_retry_client_errors(): void
+    {
+        config(['studio.ai_gateway_retries' => 3]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::response('invalid api key', 401),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'auth-ai',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Say hello.',
+        ]);
+
+        $messages = $reply->json('data.messages');
+        $reply->assertOk()->assertJsonPath('data.status', 'error');
+        $this->assertStringContainsString('HTTP 401', (string) end($messages)['content']);
+        $this->assertSame(1, $this->chatRequestCount());
+    }
+
+    public function test_agent_streams_sse_deltas_into_the_visible_reply(): void
+    {
+        $sse = implode("\n", [
+            'data: {"choices":[{"delta":{"role":"assistant","content":"Hel"}}]}',
+            'data: {"choices":[{"delta":{"content":"lo from SSE."}}]}',
+            'data: [DONE]',
+            '',
+        ]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::response($sse, 200, ['Content-Type' => 'text/event-stream']),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'stream-ai',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Say hello.',
+        ]);
+
+        $messages = $reply->json('data.messages');
+        $reply->assertOk()->assertJsonPath('data.status', 'idle');
+        $this->assertSame('Hello from SSE.', end($messages)['content']);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/v1/chat/completions') && $request['stream'] === true);
+    }
+
+    public function test_agent_streams_tool_call_deltas(): void
+    {
+        $sse = implode("\n", [
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stream","type":"function","function":{"name":"write_file","arguments":""}}]}}]}',
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"path\\":\\"STREAM.md\\",\\"content\\":\\"streamed\\\\n\\"}"}}]}}]}',
+            'data: [DONE]',
+            '',
+        ]);
+
+        Http::fake([
+            '*/v1/models' => Http::response(['data' => [['id' => 'test-model']]]),
+            '*/v1/chat/completions' => Http::sequence()
+                ->push($sse, 200, ['Content-Type' => 'text/event-stream'])
+                ->push($this->textResponse('Wrote STREAM.md.')),
+        ]);
+
+        $user = User::factory()->create();
+        $id = $this->actingAs($user, 'sanctum')->postJson('/api/workspaces', [
+            'name' => 'stream-tools',
+            'type' => 'app',
+        ])->json('data.id');
+        $sessionId = $this->actingAs($user, 'sanctum')
+            ->postJson("/api/workspaces/{$id}/ai/sessions", ['model' => 'test-model'])
+            ->json('data.id');
+
+        $reply = $this->actingAs($user, 'sanctum')->postJson("/api/ai/sessions/{$sessionId}/messages", [
+            'content' => 'Write STREAM.md.',
+        ]);
+
+        $reply->assertOk()
+            ->assertJsonPath('data.status', 'idle')
+            ->assertJsonPath('data.operations.0.tool', 'write_file')
+            ->assertJsonPath('data.operations.0.status', 'ok');
+        $messages = $reply->json('data.messages');
+        $this->assertSame('Wrote STREAM.md.', end($messages)['content']);
+
+        $workspace = Workspace::query()->findOrFail($id);
+        $this->assertFileExists($workspace->path.'/repo/STREAM.md');
+        $this->assertSame("streamed\n", File::get($workspace->path.'/repo/STREAM.md'));
+    }
+
     /**
      * @param  array<string, mixed>  $arguments
      * @return array<string, mixed>
@@ -297,5 +508,12 @@ class AiSessionTest extends TestCase
                 ],
             ]],
         ];
+    }
+
+    private function chatRequestCount(): int
+    {
+        return collect(Http::recorded())
+            ->filter(fn (array $pair): bool => str_contains($pair[0]->url(), '/v1/chat/completions'))
+            ->count();
     }
 }

@@ -113,11 +113,12 @@ class AgentRunner
         $workspace = $session->workspace;
         $this->git->ensureRepository($workspace);
         $messages = $this->llmMessages($session, $workspace);
-        $max = max(1, (int) config('studio.ai_max_iterations', 8));
+        $max = (int) config('studio.ai_max_iterations', 0);
+        $unlimited = $max <= 0;
         $useTools = $this->gateway->supportsNativeTools();
         $nativeFailed = false;
 
-        for ($i = 0; $i < $max; $i++) {
+        for ($i = 0; $unlimited || $i < $max; $i++) {
             if ($this->wasStopped($session)) {
                 return;
             }
@@ -125,11 +126,14 @@ class AgentRunner
             $tools = ($useTools && ! $nativeFailed) ? $this->tools->definitions() : null;
 
             try {
-                $choice = $this->gateway->chat($session->model, $messages, $tools);
+                $choice = $this->requestChat($session, $messages, $tools);
             } catch (RuntimeException $e) {
+                if ($this->wasStopped($session) || $e->getMessage() === 'Agent stopped.') {
+                    return;
+                }
                 if ($tools && $this->looksLikeMissingTools($e->getMessage())) {
                     $nativeFailed = true;
-                    $choice = $this->gateway->chat($session->model, $messages, null);
+                    $choice = $this->requestChat($session, $messages, null);
                 } else {
                     throw $e;
                 }
@@ -141,7 +145,6 @@ class AgentRunner
 
             $toolCalls = $choice['tool_calls'] ?? null;
             if (is_array($toolCalls) && $toolCalls !== []) {
-                $this->storeAssistant($session, $choice);
                 $messages[] = $this->sanitizeChoice($choice);
                 foreach ($toolCalls as $call) {
                     $result = $this->runToolCall($session, $workspace, $user, $call);
@@ -154,7 +157,6 @@ class AgentRunner
             $text = trim((string) ($choice['content'] ?? ''));
             $action = $this->parseJsonAction($text);
             if ($action && isset($action['tool'])) {
-                $this->storeAssistant($session, ['content' => $text, 'tool_calls' => null]);
                 $messages[] = ['role' => 'assistant', 'content' => $text];
                 $output = $this->tools->execute(
                     $session,
@@ -177,10 +179,7 @@ class AgentRunner
             if ($reply === '') {
                 $reply = 'Done. Check the diff for file changes.';
             }
-            $session->messages()->create([
-                'role' => 'assistant',
-                'content' => $reply,
-            ]);
+            $this->upsertFinalAssistant($session, $reply);
 
             return;
         }
@@ -254,6 +253,79 @@ PROMPT;
     }
 
     /**
+     * @param  list<array<string, mixed>>  $messages
+     * @param  list<array<string, mixed>>|null  $tools
+     * @return array<string, mixed>
+     */
+    private function requestChat(AiSession $session, array $messages, ?array $tools): array
+    {
+        $draft = null;
+        $assembled = '';
+        $lastFlush = 0.0;
+
+        $flush = function (bool $force = false) use ($session, &$draft, &$assembled, &$lastFlush): void {
+            if ($assembled === '') {
+                return;
+            }
+            $now = microtime(true);
+            if (! $force && $draft !== null && ($now - $lastFlush) < 0.12) {
+                return;
+            }
+            if ($draft === null) {
+                $draft = $session->messages()->create([
+                    'role' => 'assistant',
+                    'content' => $assembled,
+                ]);
+            } else {
+                $draft->update(['content' => $assembled]);
+            }
+            $lastFlush = $now;
+        };
+
+        $choice = $this->gateway->chat(
+            $session->model,
+            $messages,
+            $tools,
+            function (string $delta, bool $reset = false) use ($session, &$assembled, &$draft, $flush): void {
+                if ($reset) {
+                    $assembled = '';
+                    if ($draft !== null) {
+                        $draft->update(['content' => '', 'tool_calls' => null]);
+                    }
+
+                    return;
+                }
+                if ($this->wasStopped($session)) {
+                    throw new RuntimeException('Agent stopped.');
+                }
+                $assembled .= $delta;
+                $flush();
+            },
+        );
+
+        $flush(true);
+
+        $content = isset($choice['content']) && is_string($choice['content']) ? $choice['content'] : $assembled;
+        $toolCalls = $choice['tool_calls'] ?? null;
+        $normalized = [
+            'role' => 'assistant',
+            'content' => $content,
+            'tool_calls' => is_array($toolCalls) && $toolCalls !== [] ? $toolCalls : null,
+        ];
+
+        if ($draft !== null) {
+            $draft->update([
+                'content' => $normalized['content'],
+                'tool_calls' => $normalized['tool_calls'],
+            ]);
+        } elseif ($normalized['content'] !== '' || $normalized['tool_calls'] !== null) {
+            $this->storeAssistant($session, $normalized);
+        }
+
+        return $normalized;
+    }
+
+    /**
      * @param  array<string, mixed>  $choice
      */
     private function storeAssistant(AiSession $session, array $choice): void
@@ -262,6 +334,21 @@ PROMPT;
             'role' => 'assistant',
             'content' => isset($choice['content']) && is_string($choice['content']) ? $choice['content'] : '',
             'tool_calls' => $choice['tool_calls'] ?? null,
+        ]);
+    }
+
+    private function upsertFinalAssistant(AiSession $session, string $reply): void
+    {
+        $last = $session->messages()->orderByDesc('id')->first();
+        if ($last instanceof AiMessage && $last->role === 'assistant' && empty($last->tool_calls)) {
+            $last->update(['content' => $reply]);
+
+            return;
+        }
+
+        $session->messages()->create([
+            'role' => 'assistant',
+            'content' => $reply,
         ]);
     }
 

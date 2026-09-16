@@ -5,9 +5,11 @@ return [
     'ai_gateway_url' => rtrim((string) env('AI_GATEWAY_URL', 'https://freellmapi.ai101.eu.org'), '/'),
     'ai_gateway_api_key' => env('AI_GATEWAY_API_KEY'),
     'ai_gateway_model' => env('AI_GATEWAY_MODEL'),
-    'ai_gateway_timeout' => (int) env('AI_GATEWAY_TIMEOUT', 90),
+    'ai_gateway_timeout' => (int) env('AI_GATEWAY_TIMEOUT', 300),
+    'ai_gateway_retries' => (int) env('AI_GATEWAY_RETRIES', 3),
     'ai_tool_mode' => env('AI_TOOL_MODE', 'auto'),
-    'ai_max_iterations' => (int) env('AI_MAX_ITERATIONS', 8),
+    // 0 = unlimited tool steps per turn (Cursor-style). Positive values cap the loop.
+    'ai_max_iterations' => (int) env('AI_MAX_ITERATIONS', 0),
     'agent_type' => env('AGENT_TYPE', 'studio'),
     'sandbox_driver' => env('SANDBOX_DRIVER', 'local'),
     'sandbox_image' => env('SANDBOX_IMAGE', 'openwrt-ai-agent:latest'),
