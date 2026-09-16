@@ -342,11 +342,15 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
           <>
             {!session && <p className="ai-empty muted">Starting isolated session…</p>}
             {empty && <p className="ai-empty muted">Ask the agent to edit this OpenWrt project.</p>}
-            {session?.messages.map((message) => (
-              <div key={message.id} className={`ai-msg ${message.role}`}>
-                <pre>{message.content}</pre>
-              </div>
-            ))}
+            {session?.messages.map((message) => {
+              const fromUser = message.role === 'user';
+              return (
+                <div key={message.id} className={`ai-msg ${fromUser ? 'user' : 'assistant'}`}>
+                  <span className="ai-msg-role">{fromUser ? 'You' : 'Agent'}</span>
+                  <pre>{message.content}</pre>
+                </div>
+              );
+            })}
             {busy && (
               <div className="ai-generating">
                 <span className="ai-dots" aria-hidden="true" />
