@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenWrt AI Studio — 环境已就绪</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 40px; color: #111; }
+    h1 { font-size: 22px; }
+    table { border-collapse: collapse; margin-top: 16px; }
+    th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #ddd; }
+    code { background: #f4f4f4; padding: 1px 4px; }
+    .note { color: #555; max-width: 720px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>OpenWrt AI Studio 基础设施</h1>
+  <p class="note">单机 MVP 环境已启动。数据库、缓存、对象存储和 LLM 网关均绑定 <code>127.0.0.1</code>，不对外网开放。</p>
+  <table>
+    <tr><th>服务</th><th>本机地址</th></tr>
+    <tr><td>状态页</td><td><code>http://127.0.0.1:8080</code></td></tr>
+    <tr><td>PostgreSQL 16</td><td><code>127.0.0.1:5432</code></td></tr>
+    <tr><td>Redis 7</td><td><code>127.0.0.1:6379</code></td></tr>
+    <tr><td>MinIO API</td><td><code>127.0.0.1:9000</code></td></tr>
+    <tr><td>MinIO Console</td><td><code>http://127.0.0.1:9001</code></td></tr>
+    <tr><td>FreeLLMAPI</td><td><code>http://127.0.0.1:3001</code></td></tr>
+  </table>
+  <p class="note">凭据在 <code>infrastructure/compose/.env</code>。Laravel / React / OpenHands / Build Worker 尚未部署，等应用代码就绪后再接入。</p>
+</body>
+</html>

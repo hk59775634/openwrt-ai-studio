@@ -1,0 +1,21 @@
+FROM debian:buster-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN printf 'deb http://archive.debian.org/debian buster main\n' > /etc/apt/sources.list \
+    && printf 'deb http://archive.debian.org/debian-security buster/updates main\n' >> /etc/apt/sources.list \
+    && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99no-check \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential flex bison gawk gcc g++ gettext git libncurses5-dev \
+        libssl-dev python python-dev rsync unzip zlib1g-dev file wget ca-certificates \
+        curl libelf-dev util-linux perl quilt time xz-utils bzip2 patch diffutils \
+        autoconf automake libtool pkg-config subversion \
+    && ln -sf python2 /usr/bin/python \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 1000 -m builder \
+    && mkdir -p /src /out /work /opt/openwrt /ccache \
+    && chown 1000:1000 /src /out /work /opt/openwrt /ccache
+
+USER 1000:1000
+WORKDIR /work

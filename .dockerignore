@@ -1,0 +1,7 @@
+apps/api/vendor
+apps/api/node_modules
+apps/web/node_modules
+/data
+**/.git
+**/storage/logs
+**/storage/framework/testing

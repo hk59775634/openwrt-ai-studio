@@ -1,0 +1,22 @@
+{
+    "platforms": [
+        {
+            "target": "ramips",
+            "subtarget": "mt7628",
+            "arch": "ramips_24kec",
+            "label": "MTK vendor SDK / MT7628",
+            "chip": "MT7628",
+            "sdk": "openwrt-ai-buildroot:14.07",
+            "source": "mtk-mt7628",
+            "revision": "mtk-mt7628",
+            "vendor": true,
+            "ready": true,
+            "devices": [
+                {
+                    "profile": "MT7628",
+                    "label": "MediaTek MT7628 (vendor Wi-Fi driver)"
+                }
+            ]
+        }
+    ]
+}
