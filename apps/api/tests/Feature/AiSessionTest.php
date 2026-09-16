@@ -66,7 +66,8 @@ class AiSessionTest extends TestCase
         $reply->assertOk()
             ->assertJsonPath('data.status', 'idle')
             ->assertJsonPath('data.operations.0.tool', 'write_file')
-            ->assertJsonPath('data.operations.0.status', 'ok');
+            ->assertJsonPath('data.operations.0.status', 'ok')
+            ->assertJsonPath('data.operations.0.input.path', 'NOTES.md');
 
         $this->assertStringContainsString('Created NOTES.md', (string) $reply->json('data.messages.1.content'));
         $this->assertStringContainsString('Edited by the agent', (string) $reply->json('diff'));

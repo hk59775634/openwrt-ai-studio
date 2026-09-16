@@ -1,9 +1,32 @@
-import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } from 'react';
-import { api, type AiSession, type AiSessionSummary } from '../api';
+import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { api, type AiMessage, type AiOperation, type AiSession, type AiSessionSummary } from '../api';
+import { MarkdownBody } from './MarkdownBody';
 
 type Props = {
   workspaceId: string;
   onApplied: () => Promise<void>;
+};
+
+type TraceKind = 'explore' | 'read' | 'edit' | 'run' | 'other';
+
+type TraceChild = {
+  id: string;
+  title: string;
+  status: string;
+};
+
+type TraceItem = {
+  id: string;
+  kind: TraceKind;
+  title: string;
+  status: string;
+  children?: TraceChild[];
+};
+
+type AgentTurn = {
+  user: AiMessage;
+  steps: TraceItem[];
+  replies: AiMessage[];
 };
 
 function formatWhen(iso?: string): string {
@@ -15,6 +38,180 @@ function formatWhen(iso?: string): string {
     return '';
   }
   return date.toLocaleString();
+}
+
+function clip(text: string, max = 72): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
+}
+
+function operationTarget(op: AiOperation): string {
+  const input = op.input ?? {};
+  if (typeof input.path === 'string' && input.path.trim() !== '') {
+    return input.path.trim();
+  }
+  if (Array.isArray(input.argv)) {
+    return input.argv.map(String).join(' ');
+  }
+  return '';
+}
+
+function operationKind(tool: string): TraceKind {
+  if (tool.includes('list_files') || tool.includes('git_diff')) {
+    return 'explore';
+  }
+  if (tool.includes('read_file')) {
+    return 'read';
+  }
+  if (tool.includes('write_file')) {
+    return 'edit';
+  }
+  if (tool.includes('sandbox_exec')) {
+    return 'run';
+  }
+  return 'other';
+}
+
+function operationTitle(op: AiOperation): string {
+  const target = operationTarget(op);
+  const tool = op.tool;
+  if (tool.includes('list_files')) {
+    return target && target !== '.' ? `Explored ${target}` : 'Explored workspace';
+  }
+  if (tool.includes('read_file')) {
+    return target ? `Read ${target}` : 'Read file';
+  }
+  if (tool.includes('write_file')) {
+    return target ? `Edited ${target}` : 'Edited file';
+  }
+  if (tool.includes('git_diff')) {
+    return target ? `Inspected diff ${target}` : 'Inspected diff';
+  }
+  if (tool.includes('sandbox_exec')) {
+    return target ? `Ran ${clip(target, 64)}` : 'Ran command';
+  }
+  return tool;
+}
+
+function groupOperations(ops: AiOperation[]): TraceItem[] {
+  const items: TraceItem[] = [];
+  let explore: AiOperation[] = [];
+
+  const flushExplore = () => {
+    if (explore.length === 0) {
+      return;
+    }
+    const children = explore.map((op) => ({
+      id: String(op.id),
+      title: operationTitle(op),
+      status: op.status,
+    }));
+    const failed = explore.some((op) => op.status === 'error');
+    items.push({
+      id: `explore-${explore[0].id}`,
+      kind: 'explore',
+      title: explore.length > 1 ? `Explored ${explore.length} files` : children[0].title,
+      status: failed ? 'error' : 'ok',
+      children: explore.length > 1 ? children : undefined,
+    });
+    explore = [];
+  };
+
+  for (const op of ops) {
+    const kind = operationKind(op.tool);
+    if (kind === 'explore' || kind === 'read') {
+      explore.push(op);
+      continue;
+    }
+    flushExplore();
+    items.push({
+      id: String(op.id),
+      kind,
+      title: operationTitle(op),
+      status: op.status,
+    });
+  }
+  flushExplore();
+  return items;
+}
+
+function inWindow(iso: string, start: string, end?: string): boolean {
+  return iso >= start && (!end || iso < end);
+}
+
+function turnsFromSession(session: AiSession): AgentTurn[] {
+  const users = session.messages.filter((message) => message.role === 'user');
+  const replies = session.messages.filter((message) => message.role === 'assistant');
+  const operations = session.operations ?? [];
+
+  return users.map((user, index) => {
+    const next = users[index + 1]?.created_at;
+    return {
+      user,
+      steps: groupOperations(operations.filter((op) => inWindow(op.created_at, user.created_at, next))),
+      replies: replies.filter((message) => inWindow(message.created_at, user.created_at, next)),
+    };
+  });
+}
+
+function TraceBlock({
+  steps,
+  thinking,
+  defaultOpen,
+  openGroups,
+  onToggle,
+}: {
+  steps: TraceItem[];
+  thinking: boolean;
+  defaultOpen: boolean;
+  openGroups: Record<string, boolean>;
+  onToggle: (id: string) => void;
+}) {
+  if (steps.length === 0 && !thinking) {
+    return null;
+  }
+
+  return (
+    <div className="ai-trace">
+      {steps.length > 0 && <span className="ai-trace-label">Thought</span>}
+      {steps.map((step) => {
+        const open = openGroups[step.id] ?? defaultOpen;
+        const children = step.children ?? [];
+        return (
+          <div key={step.id} className={`ai-step ${step.kind}${step.status === 'error' ? ' error' : ''}`}>
+            <span className="ai-step-mark" aria-hidden="true" />
+            {children.length > 0 ? (
+              <div>
+                <button type="button" className={`ai-step-toggle${open ? ' open' : ''}`} onClick={() => onToggle(step.id)}>
+                  <span className="chevron" aria-hidden="true">
+                    ▸
+                  </span>
+                  {step.title}
+                </button>
+                {open && (
+                  <ul className="ai-step-files">
+                    {children.map((child) => (
+                      <li key={child.id} className={child.status === 'error' ? 'error' : undefined}>
+                        {child.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <span>{step.title}</span>
+            )}
+          </div>
+        );
+      })}
+      {thinking && (
+        <div className="ai-step thinking">
+          <span className="ai-step-mark" aria-hidden="true" />
+          <span>Thinking</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function IconHistory() {
@@ -62,7 +259,9 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const scroller = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLTextAreaElement>(null);
   const onAppliedRef = useRef(onApplied);
   onAppliedRef.current = onApplied;
 
@@ -128,7 +327,7 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
-  }, [session?.messages, busy, showHistory]);
+  }, [session?.messages, session?.operations, busy, showHistory]);
 
   useEffect(() => {
     if (!session || session.status !== 'running') {
@@ -160,6 +359,20 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
       window.clearInterval(timer);
     };
   }, [session?.id, session?.status, workspaceId]);
+
+  useEffect(() => {
+    setOpenGroups({});
+  }, [session?.id]);
+
+  useLayoutEffect(() => {
+    const el = composer.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = '0px';
+    const cap = Math.round(window.innerHeight * 0.42);
+    el.style.height = `${Math.max(72, Math.min(el.scrollHeight, cap))}px`;
+  }, [draft, showHistory]);
 
   async function sendDraft() {
     if (!session || !draft.trim() || busy) {
@@ -276,8 +489,7 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
   }
 
   const empty = Boolean(session && session.messages.length === 0 && !busy);
-  const lastVisible = session?.messages.at(-1);
-  const streamingReply = Boolean(busy && lastVisible && lastVisible.role === 'assistant' && lastVisible.content);
+  const turns = session ? turnsFromSession(session) : [];
 
   return (
     <aside className="ide-ai">
@@ -344,22 +556,39 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
           <>
             {!session && <p className="ai-empty muted">Starting isolated session…</p>}
             {empty && <p className="ai-empty muted">Ask the agent to edit this OpenWrt project.</p>}
-            {session?.messages.map((message, index) => {
-              const fromUser = message.role === 'user';
-              const streaming = Boolean(streamingReply && !fromUser && index === session.messages.length - 1);
-              return (
-                <div key={message.id} className={`ai-msg ${fromUser ? 'user' : 'assistant'}${streaming ? ' streaming' : ''}`}>
-                  <span className="ai-msg-role">{fromUser ? 'You' : 'Agent'}</span>
-                  <pre>{message.content}</pre>
-                </div>
-              );
-            })}
-            {busy && !streamingReply && (
-              <div className="ai-generating">
-                <span className="ai-dots" aria-hidden="true" />
-                Generating…
-              </div>
-            )}
+            {session &&
+              turns.map((turn, turnIndex) => {
+                const lastTurn = turnIndex === turns.length - 1;
+                const lastReply = turn.replies.at(-1);
+                const streamingReply = Boolean(busy && lastTurn && lastReply?.content);
+                const thinking = Boolean(busy && lastTurn && !streamingReply);
+                return (
+                  <div key={turn.user.id} className="ai-turn">
+                    <div className="ai-msg user">
+                      <span className="ai-msg-role">You</span>
+                      <pre>{turn.user.content}</pre>
+                    </div>
+                    <TraceBlock
+                      steps={turn.steps}
+                      thinking={thinking}
+                      defaultOpen={Boolean(busy && lastTurn)}
+                      openGroups={openGroups}
+                      onToggle={(id) => {
+                        setOpenGroups((current) => ({ ...current, [id]: !(current[id] ?? Boolean(busy && lastTurn)) }));
+                      }}
+                    />
+                    {turn.replies.map((message, replyIndex) => {
+                      const streaming = Boolean(streamingReply && replyIndex === turn.replies.length - 1);
+                      return (
+                        <div key={message.id} className={`ai-msg assistant${streaming ? ' streaming' : ''}`}>
+                          <span className="ai-msg-role">Agent</span>
+                          <MarkdownBody text={message.content} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
           </>
         )}
       </div>
@@ -367,11 +596,12 @@ export function AiPanel({ workspaceId, onApplied }: Props) {
       <form className="ide-ai-form" onSubmit={(event) => void onSend(event)}>
           <div className="ide-ai-composer">
             <textarea
+              ref={composer}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onComposerKey}
               placeholder={busy ? 'Agent is working…' : 'Ask to edit this OpenWrt project'}
-              rows={3}
+              rows={1}
               disabled={!session || showHistory}
             />
             <div className="ide-ai-composer-bar">
